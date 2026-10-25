@@ -13,7 +13,9 @@ import {
   Layers,
   Sparkles,
   Check,
-  RotateCcw
+  RotateCcw,
+  RefreshCw,
+  AlertTriangle
 } from 'lucide-react';
 import { apiService } from '../api/client';
 
@@ -25,39 +27,40 @@ export default function InvestigationPage() {
   const [selectedIncidentId, setSelectedIncidentId] = useState('');
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [resolutionNotes, setResolutionNotes] = useState('');
 
-  // Initial load
-  useEffect(() => {
-    const loadIncidents = async () => {
-      try {
-        const list = await apiService.getIncidents({ limit: 50 });
-        setIncidents(list || []);
+  const loadIncidents = async () => {
+    try {
+      setError(null);
+      const list = await apiService.getIncidents({ limit: 50 });
+      setIncidents(list || []);
 
-        const urlIncidentId = searchParams.get('incident_id');
-        const urlPipelineId = searchParams.get('pipeline_id');
+      const urlIncidentId = searchParams.get('incident_id');
+      const urlPipelineId = searchParams.get('pipeline_id');
 
-        if (urlIncidentId) {
-          setSelectedIncidentId(urlIncidentId);
-          fetchInvestigation(urlIncidentId);
-        } else if (urlPipelineId && list && list.length > 0) {
-          const match = list.find((i) => i.pipeline_id === urlPipelineId);
-          if (match) {
-            setSelectedIncidentId(match.incident_id);
-            fetchInvestigation(match.incident_id);
-          } else {
-            setSelectedIncidentId(list[0].incident_id);
-            fetchInvestigation(list[0].incident_id);
-          }
-        } else if (list && list.length > 0) {
-          setSelectedIncidentId(list[0].incident_id);
-          fetchInvestigation(list[0].incident_id);
-        }
-      } catch (err) {
-        console.error('Failed to load incidents list:', err);
+      let targetId = null;
+      if (urlIncidentId) {
+        targetId = urlIncidentId;
+      } else if (urlPipelineId && list && list.length > 0) {
+        const match = list.find((i) => i.pipeline_id === urlPipelineId);
+        targetId = match ? match.incident_id : list[0].incident_id;
+      } else if (list && list.length > 0) {
+        targetId = list[0].incident_id;
       }
-    };
+
+      if (targetId) {
+        setSelectedIncidentId(targetId);
+        fetchInvestigation(targetId);
+      }
+    } catch (err) {
+      console.error('Failed to load incidents list:', err);
+      setError('Failed to retrieve incidents from Exasol database. Please verify backend status.');
+    }
+  };
+
+  useEffect(() => {
     loadIncidents();
   }, [searchParams]);
 
@@ -65,10 +68,12 @@ export default function InvestigationPage() {
     if (!id) return;
     try {
       setLoading(true);
+      setError(null);
       const data = await apiService.investigateIncident(id);
       setReport(data);
     } catch (err) {
       console.error('Investigation failed:', err);
+      setError(`Failed to load investigation report for incident ${id}: ${err.message || 'Server error'}`);
     } finally {
       setLoading(false);
     }
@@ -113,7 +118,7 @@ export default function InvestigationPage() {
           </p>
         </div>
 
-        {/* Incident Dropdown */}
+        {/* Incident Dropdown & Actions */}
         <div className="flex items-center space-x-3">
           <label className="text-xs text-slate-400">Target Incident:</label>
           <select
@@ -122,16 +127,50 @@ export default function InvestigationPage() {
               setSelectedIncidentId(e.target.value);
               fetchInvestigation(e.target.value);
             }}
-            className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white focus:outline-none focus:border-cyan-500 font-mono"
+            disabled={incidents.length === 0}
+            className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white focus:outline-none focus:border-cyan-500 font-mono max-w-[280px] sm:max-w-[360px] truncate"
           >
-            {incidents.map((inc) => (
-              <option key={inc.incident_id} value={inc.incident_id}>
-                [{inc.severity}] {inc.pipeline_name || inc.pipeline_id} — {inc.incident_type}
-              </option>
-            ))}
+            {incidents.length === 0 ? (
+              <option value="">No incidents found in Exasol</option>
+            ) : (
+              incidents.map((inc) => (
+                <option key={inc.incident_id} value={inc.incident_id}>
+                  [{inc.severity}] {inc.pipeline_name || inc.pipeline_id} — {inc.incident_type}
+                </option>
+              ))
+            )}
           </select>
+          <button
+            onClick={() => {
+              if (selectedIncidentId) {
+                fetchInvestigation(selectedIncidentId);
+              } else {
+                loadIncidents();
+              }
+            }}
+            title="Refresh Incident RCA"
+            className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg border border-slate-700 transition"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          </button>
         </div>
       </div>
+
+      {/* Error Alert */}
+      {error && (
+        <div className="p-4 bg-rose-950/40 border border-rose-800/80 rounded-xl flex items-center justify-between text-xs text-rose-300">
+          <div className="flex items-center space-x-2">
+            <AlertTriangle className="w-4 h-4 text-rose-400 flex-shrink-0" />
+            <span>{error}</span>
+          </div>
+          <button
+            onClick={loadIncidents}
+            className="px-3 py-1 bg-rose-900/60 hover:bg-rose-800 text-white rounded font-medium transition"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       {loading ? (
         <div className="py-24 flex flex-col items-center justify-center">
@@ -139,8 +178,20 @@ export default function InvestigationPage() {
           <p className="text-sm text-slate-400 font-mono">Aggregating multi-table evidence from Exasol...</p>
         </div>
       ) : !report ? (
-        <div className="p-8 text-center text-slate-500 bg-[#0d1424] border border-slate-800 rounded-xl">
-          Select an incident to view root cause analysis.
+        <div className="p-12 text-center text-slate-400 bg-[#0d1424] border border-slate-800 rounded-xl space-y-4">
+          <AlertOctagon className="w-10 h-10 text-cyan-400 mx-auto opacity-70" />
+          <div>
+            <h3 className="text-base font-semibold text-slate-200">No Incident Selected</h3>
+            <p className="text-xs text-slate-500 max-w-md mx-auto mt-1">
+              Select an incident from the dropdown above or inspect recent anomalies to load root cause diagnostics backed by Exasol telemetry.
+            </p>
+          </div>
+          <button
+            onClick={() => navigate('/simulator')}
+            className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-semibold transition"
+          >
+            Simulate New Incident Scenario
+          </button>
         </div>
       ) : (
         <div className="space-y-6">
@@ -238,37 +289,45 @@ export default function InvestigationPage() {
                 <div className="flex items-center justify-between mb-4">
                   <h4 className="text-sm font-semibold text-white">Database Evidence Points</h4>
                   <span className="text-xs font-mono text-cyan-400">
-                    {report.evidence_points.length} Statistical Indicators Verified
+                    {report.evidence_points ? report.evidence_points.length : 0} Statistical Indicators Verified
                   </span>
                 </div>
 
                 <div className="space-y-3">
-                  {report.evidence_points.map((ev, idx) => (
-                    <div
-                      key={idx}
-                      className="p-3 bg-slate-900/80 border border-slate-800 rounded-lg flex items-center justify-between text-xs"
-                    >
-                      <div className="space-y-1 max-w-lg">
-                        <div className="flex items-center space-x-2">
-                          <span
-                            className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold ${
-                              ev.severity === 'CRITICAL'
-                                ? 'bg-rose-950 text-rose-400 border border-rose-800'
-                                : 'bg-amber-950 text-amber-400 border border-amber-800'
-                            }`}
-                          >
-                            {ev.category}
-                          </span>
+                  {report.evidence_points && report.evidence_points.length > 0 ? (
+                    report.evidence_points.map((ev, idx) => (
+                      <div
+                        key={idx}
+                        className="p-3 bg-slate-900/80 border border-slate-800 rounded-lg flex items-center justify-between text-xs"
+                      >
+                        <div className="space-y-1 max-w-lg">
+                          <div className="flex items-center space-x-2">
+                            <span
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold ${
+                                ev.severity === 'CRITICAL'
+                                  ? 'bg-rose-950 text-rose-400 border border-rose-800'
+                                  : ev.severity === 'HIGH'
+                                  ? 'bg-amber-950 text-amber-400 border border-amber-800'
+                                  : 'bg-blue-950 text-blue-400 border border-blue-800'
+                              }`}
+                            >
+                              {ev.category}
+                            </span>
+                          </div>
+                          <p className="text-slate-200 font-medium">{ev.finding}</p>
                         </div>
-                        <p className="text-slate-200 font-medium">{ev.finding}</p>
-                      </div>
 
-                      <div className="text-right font-mono text-[11px] flex-shrink-0 ml-4">
-                        <div className="text-rose-400 font-bold">{ev.metric_value}</div>
-                        <div className="text-slate-500">Base: {ev.baseline_value}</div>
+                        <div className="text-right font-mono text-[11px] flex-shrink-0 ml-4">
+                          <div className="text-rose-400 font-bold">{ev.metric_value}</div>
+                          <div className="text-slate-500">Base: {ev.baseline_value}</div>
+                        </div>
                       </div>
+                    ))
+                  ) : (
+                    <div className="p-4 text-center text-xs text-slate-500">
+                      Standard operating baseline maintained across telemetry indicators.
                     </div>
-                  ))}
+                  )}
                 </div>
               </div>
 
@@ -276,15 +335,19 @@ export default function InvestigationPage() {
               <div className="p-5 bg-[#0d1424] border border-slate-800 rounded-xl">
                 <h4 className="text-sm font-semibold text-white mb-3">Suggested Remediation Protocol</h4>
                 <ul className="space-y-2">
-                  {report.suggested_actions.map((act, idx) => (
-                    <li
-                      key={idx}
-                      className="flex items-start space-x-2.5 text-xs text-slate-300 p-2.5 bg-slate-900/60 border border-slate-800/80 rounded-lg"
-                    >
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-                      <span>{act}</span>
-                    </li>
-                  ))}
+                  {report.suggested_actions && report.suggested_actions.length > 0 ? (
+                    report.suggested_actions.map((act, idx) => (
+                      <li
+                        key={idx}
+                        className="flex items-start space-x-2.5 text-xs text-slate-300 p-2.5 bg-slate-900/60 border border-slate-800/80 rounded-lg"
+                      >
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+                        <span>{act}</span>
+                      </li>
+                    ))
+                  ) : (
+                    <li className="text-xs text-slate-500">No immediate remediation action required.</li>
+                  )}
                 </ul>
               </div>
             </div>
@@ -347,7 +410,7 @@ export default function InvestigationPage() {
                 <div>
                   <div className="font-semibold text-slate-200">Downstream Blast Radius</div>
                   <div className="text-[11px] text-slate-400">
-                    {report.downstream_impact.length} downstream pipelines exposed
+                    {report.downstream_impact ? report.downstream_impact.length : 0} downstream pipelines exposed
                   </div>
                 </div>
                 <button

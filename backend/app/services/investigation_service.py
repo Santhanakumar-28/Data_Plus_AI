@@ -25,7 +25,7 @@ class InvestigationService:
                 i.pipeline_id,
                 p.pipeline_name,
                 i.run_id,
-                i.detected_at,
+                CAST(i.detected_at AS VARCHAR(32)) AS detected_at,
                 i.incident_type,
                 i.severity,
                 i.description,
@@ -45,13 +45,13 @@ class InvestigationService:
         pipeline_name = inc.get("PIPELINE_NAME")
         run_id = inc.get("RUN_ID")
 
-        # 2. Fetch specific run telemetry and DQ if run_id exists
+        # 2. Fetch specific run telemetry and DQ
         run_data: Dict[str, Any] = {}
         if run_id:
             run_sql = f"""
                 SELECT 
                     r.run_id,
-                    r.start_time,
+                    CAST(r.start_time AS VARCHAR(32)) AS start_time,
                     r.duration_seconds,
                     r.status,
                     r.records_processed,
@@ -71,6 +71,33 @@ class InvestigationService:
             run_rows = exasol_client.execute_query(run_sql)
             if run_rows:
                 run_data = run_rows[0]
+        else:
+            # If run_id is not specified, fetch latest run for pipeline
+            fallback_sql = f"""
+                SELECT 
+                    r.run_id,
+                    CAST(r.start_time AS VARCHAR(32)) AS start_time,
+                    r.duration_seconds,
+                    r.status,
+                    r.records_processed,
+                    r.error_count,
+                    r.cpu_usage,
+                    r.memory_usage,
+                    r.retry_count,
+                    dq.completeness_score,
+                    dq.freshness_minutes,
+                    dq.duplicate_count,
+                    dq.null_count,
+                    dq.schema_error_count
+                FROM {settings.EXASOL_SCHEMA}.PIPELINE_RUNS r
+                LEFT JOIN {settings.EXASOL_SCHEMA}.DATA_QUALITY dq ON r.run_id = dq.run_id
+                WHERE r.pipeline_id = '{pipeline_id}'
+                ORDER BY r.start_time DESC
+                LIMIT 1
+            """
+            fallback_rows = exasol_client.execute_query(fallback_sql)
+            if fallback_rows:
+                run_data = fallback_rows[0]
 
         # 3. Query historical baseline for this pipeline using Exasol analytical aggregation
         baseline_sql = f"""
@@ -90,6 +117,7 @@ class InvestigationService:
         avg_dur = float(baseline.get("AVG_DURATION") or 180.0)
         std_dur = float(baseline.get("STD_DURATION") or 30.0)
         avg_rec = float(baseline.get("AVG_RECORDS") or 50000.0)
+        total_baseline_runs = int(baseline.get("TOTAL_BASELINE_RUNS") or 0)
 
         # 4. Check upstream dependencies for concurrent failures
         upstream_sql = f"""
@@ -97,7 +125,7 @@ class InvestigationService:
                 d.upstream_pipeline_id,
                 p.pipeline_name as upstream_name,
                 r.run_id as upstream_run_id,
-                r.start_time as upstream_start,
+                CAST(r.start_time AS VARCHAR(32)) as upstream_start,
                 r.status as upstream_status,
                 r.error_count as upstream_errors
             FROM {settings.EXASOL_SCHEMA}.PIPELINE_DEPENDENCIES d
@@ -179,12 +207,39 @@ class InvestigationService:
                 "baseline_value": "0"
             })
 
+        err_cnt = int(run_data.get("ERROR_COUNT") or 0)
+        if err_cnt > 0:
+            evidence_points.append({
+                "category": "ERROR_RATE",
+                "finding": f"Pipeline run logged {err_cnt} unhandled fatal errors during step execution",
+                "severity": "CRITICAL",
+                "metric_value": f"{err_cnt} errors",
+                "baseline_value": "0 errors"
+            })
+
         if upstream_culprit:
             evidence_points.append({
                 "category": "UPSTREAM_CASCADING",
                 "finding": f"Direct upstream dependency '{upstream_culprit['pipeline_name']}' is in state {upstream_culprit['status']}",
                 "severity": "CRITICAL",
                 "metric_value": upstream_culprit['status'],
+                "baseline_value": "HEALTHY"
+            })
+
+        # Ensure evidence list is never sparse
+        if len(evidence_points) < 2:
+            evidence_points.append({
+                "category": "HISTORICAL_BASELINE",
+                "finding": f"Aggregated baseline from {total_baseline_runs} successful runs: avg duration {avg_dur:.1f}s, throughput {int(avg_rec):,} records",
+                "severity": "NORMAL",
+                "metric_value": f"{avg_dur:.1f}s avg",
+                "baseline_value": f"{total_baseline_runs} runs"
+            })
+            evidence_points.append({
+                "category": "INCIDENT_SIGNATURE",
+                "finding": f"Exasol rule anomaly detected: {inc.get('DESCRIPTION') or 'Telemetry deviation from nominal envelope'}",
+                "severity": inc.get("SEVERITY", "HIGH"),
+                "metric_value": inc.get("INCIDENT_TYPE", "OPERATIONAL_FAILURE"),
                 "baseline_value": "HEALTHY"
             })
 
@@ -211,7 +266,7 @@ class InvestigationService:
         # 7. Downstream blast radius
         blast = dependency_service.calculate_blast_radius(pipeline_id)
 
-        # 8. Optional LLM analysis synthesis
+        # 8. AI analysis synthesis
         llm_text = self._synthesize_ai_explanation(
             pipeline_name=pipeline_name,
             incident_type=inc.get("INCIDENT_TYPE"),

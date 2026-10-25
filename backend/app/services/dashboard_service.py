@@ -17,9 +17,7 @@ class DashboardService:
         open incidents, and overall platform data-quality index.
         """
         schema = settings.EXASOL_SCHEMA
-        conn = exasol_client.connect()
 
-        # Analytical SQL query retrieving top-level counts and averages
         overview_sql = f"""
             WITH latest_run_status AS (
                 SELECT 
@@ -70,8 +68,7 @@ class DashboardService:
             CROSS JOIN dq_metrics d
         """
 
-        stmt = conn.execute(overview_sql)
-        row = stmt.fetchone() or {}
+        row = exasol_client.fetch_one(overview_sql) or {}
 
         total_p = row.get("TOTAL_PIPELINES", 0)
         healthy_p = row.get("HEALTHY_COUNT", 0)
@@ -112,7 +109,6 @@ class DashboardService:
         Executes date-level aggregations on historical executions and quality in Exasol.
         """
         schema = settings.EXASOL_SCHEMA
-        conn = exasol_client.connect()
 
         trends_sql = f"""
             SELECT 
@@ -130,8 +126,7 @@ class DashboardService:
             ORDER BY run_date ASC
         """
 
-        stmt = conn.execute(trends_sql)
-        rows = stmt.fetchall()
+        rows = exasol_client.fetch_all(trends_sql)
 
         trend_points = []
         for r in rows:

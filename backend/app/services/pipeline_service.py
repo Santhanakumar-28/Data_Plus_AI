@@ -23,7 +23,6 @@ class PipelineService:
         latest run status, failure rates, and active incidents.
         """
         schema = settings.EXASOL_SCHEMA
-        conn = exasol_client.connect()
 
         sql = f"""
             WITH latest_run AS (
@@ -90,8 +89,7 @@ class PipelineService:
                 p.pipeline_name ASC
         """
 
-        stmt = conn.execute(sql)
-        rows = stmt.fetchall()
+        rows = exasol_client.fetch_all(sql)
 
         summaries = []
         for r in rows:
@@ -132,7 +130,6 @@ class PipelineService:
         and dependency chains for a single pipeline.
         """
         schema = settings.EXASOL_SCHEMA
-        conn = exasol_client.connect()
 
         # 1. Pipeline metadata
         pipelines = PipelineService.list_pipelines()
@@ -160,7 +157,7 @@ class PipelineService:
             ORDER BY start_time DESC
             LIMIT 50
         """
-        runs_stmt = conn.execute(runs_sql)
+        runs_rows = exasol_client.fetch_all(runs_sql)
         recent_runs = [
             PipelineRun(
                 run_id=r["RUN_ID"],
@@ -175,7 +172,7 @@ class PipelineService:
                 memory_usage=float(r.get("MEMORY_USAGE", 0.0)),
                 retry_count=int(r.get("RETRY_COUNT", 0)),
             )
-            for r in runs_stmt.fetchall()
+            for r in runs_rows
         ]
 
         # 3. Recent Data Quality checks (last 50)
@@ -195,7 +192,7 @@ class PipelineService:
             ORDER BY checked_at DESC
             LIMIT 50
         """
-        dq_stmt = conn.execute(dq_sql)
+        dq_rows = exasol_client.fetch_all(dq_sql)
         recent_quality = [
             DataQualityCheck(
                 check_id=r["CHECK_ID"],
@@ -208,7 +205,7 @@ class PipelineService:
                 null_count=int(r.get("NULL_COUNT", 0)),
                 schema_error_count=int(r.get("SCHEMA_ERROR_COUNT", 0)),
             )
-            for r in dq_stmt.fetchall()
+            for r in dq_rows
         ]
 
         # 4. Upstream dependencies
@@ -222,7 +219,7 @@ class PipelineService:
             JOIN {schema}.PIPELINES p ON d.upstream_pipeline_id = p.pipeline_id
             WHERE d.downstream_pipeline_id = '{pipeline_id}'
         """
-        up_stmt = conn.execute(up_sql)
+        up_rows = exasol_client.fetch_all(up_sql)
         upstream_deps = [
             PipelineDependency(
                 upstream_pipeline_id=r["UPSTREAM_PIPELINE_ID"],
@@ -230,7 +227,7 @@ class PipelineService:
                 dependency_type=r["DEPENDENCY_TYPE"],
                 upstream_name=r.get("UPSTREAM_NAME"),
             )
-            for r in up_stmt.fetchall()
+            for r in up_rows
         ]
 
         # 5. Downstream dependencies
@@ -244,7 +241,7 @@ class PipelineService:
             JOIN {schema}.PIPELINES p ON d.downstream_pipeline_id = p.pipeline_id
             WHERE d.upstream_pipeline_id = '{pipeline_id}'
         """
-        down_stmt = conn.execute(down_sql)
+        down_rows = exasol_client.fetch_all(down_sql)
         downstream_deps = [
             PipelineDependency(
                 upstream_pipeline_id=r["UPSTREAM_PIPELINE_ID"],
@@ -252,7 +249,7 @@ class PipelineService:
                 dependency_type=r["DEPENDENCY_TYPE"],
                 downstream_name=r.get("DOWNSTREAM_NAME"),
             )
-            for r in down_stmt.fetchall()
+            for r in down_rows
         ]
 
         return PipelineDetail(
