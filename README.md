@@ -206,6 +206,8 @@ Exasol_project/
 │   └── schema.sql                     # Exasol SQL DDL for DATAPULSE schema
 ├── docs/
 │   ├── ARCHITECTURE.md                # System design & data flow specification
+│   ├── DEMO_GUIDE.md                  # Step-by-step judge run guide & evaluation flow
+│   ├── DEPLOYMENT.md                  # Production deployment & service orchestration
 │   ├── EXASOL_ANALYTICS.md            # Detailed catalog of all analytical SQL queries
 │   └── EXASOL_SETUP.md                # Step-by-step Exasol deployment guide
 ├── frontend/
@@ -226,7 +228,9 @@ Exasol_project/
 │   │   └── main.jsx                   # Application entrypoint
 │   └── package.json
 └── submission/
-    ├── pitch_deck/pitch_deck.md       # 10-slide presentation deck
+    ├── pitch_deck/
+    │   ├── DataPulse_AI_Pitch_Deck.pptx# Official PowerPoint Presentation Deck
+    │   └── pitch_deck.md              # Markdown transcript of 10-slide deck
     ├── demo_script.md                 # 3-minute video demonstration script
     └── submission_checklist.md        # Comprehensive Hackathon criteria audit
 ```
@@ -235,8 +239,11 @@ Exasol_project/
 
 ## 7. Submission Deliverables
 
-- **Pitch Deck (10 Slides):** [`submission/pitch_deck/pitch_deck.md`](submission/pitch_deck/pitch_deck.md)
+- **Pitch Deck (PowerPoint PPTX):** [`submission/pitch_deck/DataPulse_AI_Pitch_Deck.pptx`](submission/pitch_deck/DataPulse_AI_Pitch_Deck.pptx)
+- **Pitch Deck (Markdown):** [`submission/pitch_deck/pitch_deck.md`](submission/pitch_deck/pitch_deck.md)
 - **3-Minute Demo Video Script:** [`submission/demo_script.md`](submission/demo_script.md)
+- **Judge Run Guide:** [`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md)
+- **Deployment Instructions:** [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)
 - **Analytical SQL Query Catalog:** [`docs/EXASOL_ANALYTICS.md`](docs/EXASOL_ANALYTICS.md)
 - **Verification Checklist:** [`submission/submission_checklist.md`](submission/submission_checklist.md)
 - **Exasol Setup Guide:** [`docs/EXASOL_SETUP.md`](docs/EXASOL_SETUP.md)
